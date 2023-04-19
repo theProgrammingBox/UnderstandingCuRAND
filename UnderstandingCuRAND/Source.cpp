@@ -618,15 +618,17 @@ float curand_uniform(curandStateXORWOW_t* state)
 
 int main()
 {
-    for (uint32_t row = 0; row < 16; row++)
+    for (uint32_t row = 0; row < 32; row++)
     {
         for (uint32_t col = 0; col < 16; col++)
         {
             curandStateXORWOW_t state;
-            curand_init(0, col + row, 0, &state);
-            printf("%f\n", curand_uniform(&state));
+            curand_init(0, col + row * 16, 0, &state);
+            printf("%8.3f ", curand_uniform(&state));
         }
         printf("\n");
     }
+    printf("\n");
+
     return 0;
 }

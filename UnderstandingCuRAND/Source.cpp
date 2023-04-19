@@ -1,12 +1,5 @@
-#include <iostream>
+﻿#include <iostream>
 #include <cuda_runtime.h>
-
-#define MAX_XOR_N (5)
-#define PRECALC_NUM_MATRICES (8)
-#define PRECALC_BLOCK_SIZE (2)
-#define PRECALC_BLOCK_MASK ((1<<PRECALC_BLOCK_SIZE)-1)
-#define SKIPAHEAD_BLOCKSIZE (4)
-#define SKIPAHEAD_MASK ((1<<SKIPAHEAD_BLOCKSIZE)-1)
 
 static uint32_t precalc_xorwow_matrix[8][800] = {
 {
@@ -448,46 +441,44 @@ static uint32_t precalc_xorwow_offset_matrix[8][800] = {
 
 };
 
-void __curand_matvec(uint32_t* vector, uint32_t* matrix,
-    uint32_t* result, int n)
+void __curand_matvec(uint32_t* vector, uint32_t* matrix, uint32_t* result)
 {
-    for (int i = 0; i < n; i++) {
+    for (int i = 0; i < 5; i++)
         result[i] = 0;
-    }
-    for (int i = 0; i < n; i++) {
-        for (int j = 0; j < 32; j++) {
-            if (vector[i] & (1 << j)) {
-                for (int k = 0; k < n; k++) {
-                    result[k] ^= matrix[n * (i * 32 + j) + k];
-                }
+    for (int i = 0; i < 5; i++)
+    {
+        for (int j = 0; j < 32; j++)
+        {
+            if (vector[i] & (1 << j))
+            {
+                for (int k = 0; k < 5; k++)
+                    result[k] ^= matrix[5 * (i * 32 + j) + k];
             }
         }
     }
 }
 
-void __curand_veccopy(uint32_t* vector, uint32_t* vectorA, int n)
+void __curand_veccopy(uint32_t* vector, uint32_t* vectorA)
 {
-    for (int i = 0; i < n; i++) {
+    for (int i = 0; i < 5; i++)
         vector[i] = vectorA[i];
+}
+
+void __curand_matmat(uint32_t* matrixA, uint32_t* matrixB)
+{
+    uint32_t result[5];
+    for (int i = 0; i < 160; i++)
+    {
+        __curand_matvec(matrixA + i * 5, matrixB, result);
+        for (int j = 0; j < 5; j++)
+            matrixA[i * 5 + j] = result[j];
     }
 }
 
-void __curand_matmat(uint32_t* matrixA, uint32_t* matrixB, int n)
+void __curand_matcopy(uint32_t* matrix, uint32_t* matrixA)
 {
-    uint32_t result[MAX_XOR_N];
-    for (int i = 0; i < n * 32; i++) {
-        __curand_matvec(matrixA + i * n, matrixB, result, n);
-        for (int j = 0; j < n; j++) {
-            matrixA[i * n + j] = result[j];
-        }
-    }
-}
-
-void __curand_matcopy(uint32_t* matrix, uint32_t* matrixA, int n)
-{
-    for (int i = 0; i < n * n * 32; i++) {
+    for (int i = 0; i < 800; i++)
         matrix[i] = matrixA[i];
-    }
 }
 
 struct curandStateXORWOW_t
@@ -495,83 +486,93 @@ struct curandStateXORWOW_t
     uint32_t d, v[5];
 };
 
-template <typename T, int n>
-void _skipahead_sequence_scratch(uint64_t x, T* state, uint32_t* scratch)
+void _skipahead_sequence_scratch(uint64_t x, curandStateXORWOW_t* state, uint32_t* scratch)
 {
     uint32_t* matrix = scratch;
-    uint32_t* matrixA = scratch + (n * n * 32);
-    uint32_t* vector = scratch + (n * n * 32) + (n * n * 32);
-    uint32_t* result = scratch + (n * n * 32) + (n * n * 32) + n;
+    uint32_t* matrixA = scratch + 800;
+    uint32_t* vector = scratch + 1600;
+    uint32_t* result = scratch + 1605;
     uint64_t p = x;
-    for (int i = 0; i < n; i++)
+    for (int i = 0; i < 5; i++)
         vector[i] = state->v[i];
     int matrix_num = 0;
-    while (p && matrix_num < PRECALC_NUM_MATRICES - 1) {
-        for (uint32_t t = 0; t < (p & PRECALC_BLOCK_MASK); t++) {
-            __curand_matvec(vector, precalc_xorwow_matrix[matrix_num], result, n);
-            __curand_veccopy(vector, result, n);
+    while (p && matrix_num < 7) {
+        for (uint32_t t = 0; t < (p & 3); t++)
+        {
+            __curand_matvec(vector, precalc_xorwow_matrix[matrix_num], result);
+            __curand_veccopy(vector, result);
         }
-        p >>= PRECALC_BLOCK_SIZE;
+        p >>= 2;
         matrix_num++;
     }
-    if (p) {
-        __curand_matcopy(matrix, precalc_xorwow_matrix[PRECALC_NUM_MATRICES - 1], n);
-        __curand_matcopy(matrixA, precalc_xorwow_matrix[PRECALC_NUM_MATRICES - 1], n);
+    if (p)
+    {
+        __curand_matcopy(matrix, precalc_xorwow_matrix[7]);
+        __curand_matcopy(matrixA, precalc_xorwow_matrix[7]);
     }
-    while (p) {
-        for (uint32_t t = 0; t < (p & SKIPAHEAD_MASK); t++) {
-            __curand_matvec(vector, matrixA, result, n);
-            __curand_veccopy(vector, result, n);
+    while (p)
+    {
+        for (uint32_t t = 0; t < (p & 15); t++)
+        {
+            __curand_matvec(vector, matrixA, result);
+            __curand_veccopy(vector, result);
         }
-        p >>= SKIPAHEAD_BLOCKSIZE;
-        if (p) {
-            for (int i = 0; i < SKIPAHEAD_BLOCKSIZE; i++) {
-                __curand_matmat(matrix, matrixA, n);
-                __curand_matcopy(matrixA, matrix, n);
+        p >>= 4;
+        if (p)
+        {
+            for (int i = 0; i < 4; i++)
+            {
+                __curand_matmat(matrix, matrixA);
+                __curand_matcopy(matrixA, matrix);
             }
         }
     }
-    for (int i = 0; i < n; i++)
+    for (int i = 0; i < 5; i++)
         state->v[i] = vector[i];
 }
 
-template <typename T, int n>
-void _skipahead_scratch(uint64_t x, T* state, uint32_t* scratch)
+void _skipahead_scratch(uint64_t x, curandStateXORWOW_t* state, uint32_t* scratch)
 {
     uint32_t* matrix = scratch;
-    uint32_t* matrixA = scratch + (n * n * 32);
-    uint32_t* vector = scratch + (n * n * 32) + (n * n * 32);
-    uint32_t* result = scratch + (n * n * 32) + (n * n * 32) + n;
+    uint32_t* matrixA = scratch + 800;
+    uint32_t* vector = scratch + 1600;
+    uint32_t* result = scratch + 1605;
     uint64_t p = x;
-    for (int i = 0; i < n; i++)
+    for (int i = 0; i < 5; i++)
         vector[i] = state->v[i];
     int matrix_num = 0;
-    while (p && (matrix_num < PRECALC_NUM_MATRICES - 1)) {
-        for (uint32_t t = 0; t < (p & PRECALC_BLOCK_MASK); t++) {
-            __curand_matvec(vector, precalc_xorwow_offset_matrix[matrix_num], result, n);
-            __curand_veccopy(vector, result, n);
+    while (p && matrix_num < 7) {
+        for (uint32_t t = 0; t < (p & 3); t++)
+        {
+            __curand_matvec(vector, precalc_xorwow_offset_matrix[matrix_num], result);
+            __curand_veccopy(vector, result);
         }
-        p >>= PRECALC_BLOCK_SIZE;
+        p >>= 2;
         matrix_num++;
     }
-    if (p) {
-        __curand_matcopy(matrix, precalc_xorwow_offset_matrix[PRECALC_NUM_MATRICES - 1], n);
-        __curand_matcopy(matrixA, precalc_xorwow_offset_matrix[PRECALC_NUM_MATRICES - 1], n);
+    if (p)
+    {
+        __curand_matcopy(matrix, precalc_xorwow_offset_matrix[7]);
+        __curand_matcopy(matrixA, precalc_xorwow_offset_matrix[7]);
     }
-    while (p) {
-        for (uint32_t t = 0; t < (p & SKIPAHEAD_MASK); t++) {
-            __curand_matvec(vector, matrixA, result, n);
-            __curand_veccopy(vector, result, n);
+    while (p)
+    {
+        for (uint32_t t = 0; t < (p & 15); t++)
+        {
+            __curand_matvec(vector, matrixA, result);
+            __curand_veccopy(vector, result);
         }
-        p >>= SKIPAHEAD_BLOCKSIZE;
-        if (p) {
-            for (int i = 0; i < SKIPAHEAD_BLOCKSIZE; i++) {
-                __curand_matmat(matrix, matrixA, n);
-                __curand_matcopy(matrixA, matrix, n);
+        p >>= 4;
+        if (p)
+        {
+            for (int i = 0; i < 4; i++)
+            {
+                __curand_matmat(matrix, matrixA);
+                __curand_matcopy(matrixA, matrix);
             }
         }
     }
-    for (int i = 0; i < n; i++)
+    for (int i = 0; i < 5; i++)
         state->v[i] = vector[i];
     state->d += 362437 * (uint32_t)x;
 }
@@ -588,20 +589,20 @@ void _curand_init_scratch(uint64_t seed, uint64_t subsequence, uint64_t offset, 
     state->v[2] = 521288629UL + t1;
     state->v[3] = 88675123UL ^ t1;
     state->v[4] = 5783321UL + t0;
-    _skipahead_sequence_scratch<curandStateXORWOW_t, 5>(subsequence, state, scratch);
-    _skipahead_scratch<curandStateXORWOW_t, 5>(offset, state, scratch);
+    _skipahead_sequence_scratch(subsequence, state, scratch);
+    _skipahead_scratch(offset, state, scratch);
 }
 
 void curand_init(uint64_t seed, uint64_t subsequence, uint64_t offset, curandStateXORWOW_t* state)
 {
-    uint32_t scratch[5 * 5 * 32 * 2 + 5 * 2];
-    _curand_init_scratch(seed, subsequence, offset, state, (uint32_t*)scratch);
+    uint32_t scratch[1610];
+    _curand_init_scratch(seed, subsequence, offset, state, scratch);
 }
 
 uint32_t curand(curandStateXORWOW_t* state)
 {
     uint32_t t;
-    t = (state->v[0] ^ (state->v[0] >> 2));
+    t = state->v[0] ^ (state->v[0] >> 2);
     state->v[0] = state->v[1];
     state->v[1] = state->v[2];
     state->v[2] = state->v[3];
@@ -629,6 +630,7 @@ int main()
         printf("\n");
     }
     printf("\n");
+    printf("3");
 
     return 0;
 }

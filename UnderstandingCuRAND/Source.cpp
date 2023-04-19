@@ -174,8 +174,10 @@ int main()
 
     cudaMemcpy(host_matrix, device_matrix, matrix_size, cudaMemcpyDeviceToHost);
 
-    for (int y = 0; y < height; y++) {
-        for (int x = 0; x < width; x++) {
+    for (int y = 0; y < height; y++)
+    {
+        for (int x = 0; x < width; x++)
+        {
             printf("%u ", host_matrix[y * width + x]);
         }
         printf("\n");

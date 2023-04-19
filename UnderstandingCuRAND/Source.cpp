@@ -555,7 +555,20 @@ int main()
         {
             curandStateXORWOW_t state;
             curand_init(seed, col + row * 16, 0, &state);
+            curand_uniform(&state);
+            curand_uniform(&state);
+            curand_uniform(&state);
+            curand_uniform(&state);
+            curand_uniform(&state);
+            curand_uniform(&state);
+            curand_uniform(&state);
+            curand_uniform(&state);
+            curand_uniform(&state);
+            curand_uniform(&state);
+            curand_uniform(&state);
             printf("%8.6f ", curand_uniform(&state));
+            /*curand_init(seed, col + row * 16, 11, &state);
+            printf("%8.6f ", curand_uniform(&state));*/
         }
         printf("\n");
     }
